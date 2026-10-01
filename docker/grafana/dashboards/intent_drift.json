@@ -1,0 +1,251 @@
+{
+  "__inputs": [],
+  "__elements": {},
+  "__requires": [
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" },
+    { "type": "panel",      "id": "timeseries", "name": "Time series", "version": "" },
+    { "type": "panel",      "id": "stat",       "name": "Stat",        "version": "" },
+    { "type": "panel",      "id": "gauge",      "name": "Gauge",       "version": "" }
+  ],
+  "annotations": { "list": [] },
+  "description": "Real-time monitoring of Intent Compilation, Multi-Intent Drift, and Delegation Envelopes",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "🌐 System Health",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "options": { "0": { "color": "green",  "index": 0, "text": "NOMINAL"  } }, "type": "value" },
+            { "options": { "1": { "color": "yellow", "index": 1, "text": "WARNING"  } }, "type": "value" },
+            { "options": { "2": { "color": "purple", "index": 2, "text": "DEGRADED" } }, "type": "value" },
+            { "options": { "3": { "color": "red",    "index": 3, "text": "CRITICAL" } }, "type": "value" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "purple", "value": 2 },
+              { "color": "red",    "value": 3 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "id": 1,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "system_health_numeric", "legendFormat": "Health" }],
+      "title": "System Health",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "id": 2,
+      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "increase(kpi_drift_events_total[1m])", "legendFormat": "Drift Events/min" }],
+      "title": "Drift Events (1m)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }] }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "delegation_envelopes_active", "legendFormat": "Active Envelopes" }],
+      "title": "Active Delegation Envelopes",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "websocket_connections_active", "legendFormat": "WS Connections" }],
+      "title": "WebSocket Connections",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 101,
+      "title": "📊 Closure Gap Vector — Ct",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "min": 0, "max": 1,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.3 }, { "color": "orange", "value": 0.6 }, { "color": "red", "value": 0.8 }] },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 6 },
+      "id": 5,
+      "options": { "minVizHeight": 75, "minVizWidth": 75, "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showThresholdLabels": false, "showThresholdMarkers": true },
+      "targets": [
+        { "datasource": { "type": "prometheus" }, "expr": "closure_gap_score{dimension=\"c_sem\"}", "legendFormat": "Semantic" },
+        { "datasource": { "type": "prometheus" }, "expr": "closure_gap_score{dimension=\"c_evid\"}", "legendFormat": "Evidentiary" },
+        { "datasource": { "type": "prometheus" }, "expr": "closure_gap_score{dimension=\"c_proc\"}", "legendFormat": "Procedural" },
+        { "datasource": { "type": "prometheus" }, "expr": "closure_gap_score{dimension=\"c_inst\"}", "legendFormat": "Institutional" }
+      ],
+      "title": "Closure Gap — Ct Components",
+      "type": "gauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": false }, "unit": "percentunit", "min": 0, "max": 1 },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 6 },
+      "id": 6,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus" }, "expr": "closure_gap_score{dimension=\"c_sem\"}", "legendFormat": "C_sem (Semantic)" },
+        { "datasource": { "type": "prometheus" }, "expr": "closure_gap_score{dimension=\"c_evid\"}", "legendFormat": "C_evid (Evidentiary)" },
+        { "datasource": { "type": "prometheus" }, "expr": "closure_gap_score{dimension=\"c_proc\"}", "legendFormat": "C_proc (Procedural)" },
+        { "datasource": { "type": "prometheus" }, "expr": "closure_gap_score{dimension=\"c_inst\"}", "legendFormat": "C_inst (Institutional)" }
+      ],
+      "title": "Ct Gap Vector — Time Series",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 12 },
+      "id": 102,
+      "title": "⛓️ Multi-Intent Drift — I_tel / I_anl / I_api",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 15, "spanNulls": false }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 13 },
+      "id": 7,
+      "options": { "legend": { "calcs": ["lastNotNull", "sum"], "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus" }, "expr": "increase(kpi_drift_events_total{intent=\"I_tel\"}[30s])", "legendFormat": "I_tel — Telemetry" },
+        { "datasource": { "type": "prometheus" }, "expr": "increase(kpi_drift_events_total{intent=\"I_anl\"}[30s])", "legendFormat": "I_anl — Analytics" },
+        { "datasource": { "type": "prometheus" }, "expr": "increase(kpi_drift_events_total{intent=\"I_api\"}[30s])", "legendFormat": "I_api — API Gateway" }
+      ],
+      "title": "Drift Events per Macro-Intent (30s window)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 8, "spanNulls": false }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 20 },
+      "id": 8,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus" }, "expr": "intent_state_current{state=\"active\"}", "legendFormat": "Active — {{intent}}" },
+        { "datasource": { "type": "prometheus" }, "expr": "intent_state_current{state=\"drifting\"}", "legendFormat": "Drifting — {{intent}}" },
+        { "datasource": { "type": "prometheus" }, "expr": "intent_state_current{state=\"violated\"}", "legendFormat": "Violated — {{intent}}" }
+      ],
+      "title": "MILD State Machine — Intent States",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 8, "spanNulls": false }, "unit": "ms" },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 20 },
+      "id": 9,
+      "options": { "legend": { "calcs": ["mean", "p95"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus" }, "expr": "histogram_quantile(0.50, rate(intent_compilation_duration_ms_bucket[1m]))", "legendFormat": "p50" },
+        { "datasource": { "type": "prometheus" }, "expr": "histogram_quantile(0.95, rate(intent_compilation_duration_ms_bucket[1m]))", "legendFormat": "p95" },
+        { "datasource": { "type": "prometheus" }, "expr": "histogram_quantile(0.99, rate(intent_compilation_duration_ms_bucket[1m]))", "legendFormat": "p99" }
+      ],
+      "title": "Intent Compilation Latency (p50/p95/p99)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
+      "id": 103,
+      "title": "🔑 Delegation Envelopes & HTTP",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 8, "spanNulls": false }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 27 },
+      "id": 10,
+      "options": { "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus" }, "expr": "increase(delegation_requests_total{granted=\"True\"}[1m])", "legendFormat": "Granted" },
+        { "datasource": { "type": "prometheus" }, "expr": "increase(delegation_requests_total{granted=\"False\"}[1m])", "legendFormat": "Denied" },
+        { "datasource": { "type": "prometheus" }, "expr": "increase(intent_compilation_total{decision=\"proceed\"}[1m])", "legendFormat": "Compile: PROCEED" },
+        { "datasource": { "type": "prometheus" }, "expr": "increase(intent_compilation_total{decision=\"reject\"}[1m])", "legendFormat": "Compile: REJECT" }
+      ],
+      "title": "Delegation Requests & Compile Decisions (1m)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 8 }, "unit": "reqps" },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 27 },
+      "id": 11,
+      "options": { "legend": { "calcs": ["mean", "lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus" }, "expr": "rate(http_requests_total[1m])", "legendFormat": "{{method}} {{path}} {{status}}" }
+      ],
+      "title": "HTTP Request Rate by Endpoint",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["intent-drift-engine", "ibn", "mlid"],
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Intent Drift Engine — Full Observability",
+  "uid": "intent-drift-main",
+  "version": 1
+}

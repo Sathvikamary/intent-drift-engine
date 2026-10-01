@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "intent-drift-engine"
-version = "0.1.0"
+version = "0.3.0"
 description = "Autonomous Intent Compilation, Multi-Intent Drift Detection & Adaptive Delegation Envelopes for Intent-Based Networking"
 authors = ["Sathvikamary <sk0981@srmist.edu.in>"]
 readme = "README.md"
