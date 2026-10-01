@@ -1,11 +1,11 @@
 import React, { useState, useCallback, useRef } from 'react'
-import { useWebSocket, type WSMessage } from '../hooks/useWebSocket'
-import { SystemHealthBar } from '../components/SystemHealthBar'
-import { IntentCard } from '../components/IntentCard'
-import { KPIChart, type KPIPoint } from '../components/KPIChart'
-import { EventLog } from '../components/EventLog'
-import { IntentCompilerPanel } from '../components/IntentCompilerPanel'
-import type { Snapshot, CompiledIntent, SystemHealth, DriftSeverity, IntentKey, IntentRecord } from '../store/types'
+import { useWebSocket, type WSMessage } from './hooks/useWebSocket'
+import { SystemHealthBar } from './components/SystemHealthBar'
+import { IntentCard } from './components/IntentCard'
+import { KPIChart, type KPIPoint } from './components/KPIChart'
+import { EventLog } from './components/EventLog'
+import { IntentCompilerPanel } from './components/IntentCompilerPanel'
+import type { Snapshot, CompiledIntent, SystemHealth, DriftSeverity, IntentKey, IntentRecord } from './store/types'
 
 const WS_URL = `ws://${window.location.hostname}:8000/ws/kpi-stream`
 
