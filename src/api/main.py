@@ -1,12 +1,16 @@
 """
-FastAPI Application — Intent Drift Engine REST Interface.
+FastAPI Application v2 — Intent Drift Engine REST + WebSocket Interface.
 
-Endpoints:
-  POST /intents/compile     — Submit an intent for compilation
-  GET  /intents/{id}/status — Check compilation result
-  POST /drift/ingest        — Ingest KPI observations
-  GET  /drift/status        — Current drift state across all macro-intents
-  GET  /health              — Health check
+Phase 2 additions:
+  POST /delegation/request            — Request a delegation envelope
+  GET  /delegation/{id}               — Get envelope status
+  DELETE /delegation/{id}             — Revoke an envelope
+  POST /delegation/{id}/shrink        — Adaptively shrink envelope
+  GET  /scm/summary                   — SCM graph summary
+  POST /scm/intervene                 — Run do-calculus intervention query
+  GET  /mild/status                   — Full MILD state machine snapshot
+  POST /mild/tick                     — Run one MILD control loop tick
+  WS   /ws/kpi-stream                 — Real-time KPI broadcast stream
 """
 
 from __future__ import annotations
@@ -15,23 +19,26 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from src.compiler.compiler import (
-    IntentCompilationRequest,
-    IntentCompiler,
-)
-from src.compiler.evidentiary import ContextSource
-from src.compiler.procedural import ExecutionPath, ExecutionStep, ToolStatus
-from src.compiler.institutional import PolicyClearance, AuthorizationLevel
-from src.drift.detector import (
-    DriftDetectionResult,
-    DriftDetector,
-    KPIObservation,
-    MacroIntent,
-)
+# ── Compiler
+from src.compiler.compiler import IntentCompilationRequest, IntentCompiler
+from src.compiler.gap_vector import ClosureGapVector
+
+# ── Drift
+from src.drift.detector import DriftDetector, KPIObservation, MacroIntent
+from src.drift.scm import build_network_scm
+from src.drift.state_machine import MILDStateMachine
+
+# ── Delegation
+from src.delegation.delegator import AdaptiveDelegator, DelegationRequest
+from src.delegation.envelope import RiskTier
+from src.delegation.policy import build_baseline_policy_engine
+
+# ── WebSocket
+from src.api.websocket import kpi_stream_endpoint, manager
 
 # ── App setup ──────────────────────────────────────────────────────────────
 
@@ -39,9 +46,9 @@ app = FastAPI(
     title="Intent Drift Engine",
     description=(
         "Autonomous Intent Compilation, Multi-Intent Drift Detection, "
-        "and Adaptive Delegation Envelopes for Intent-Based Networking."
+        "Adaptive Delegation Envelopes, and MILD State Machine for IBN."
     ),
-    version="0.1.0",
+    version="0.2.0",
 )
 
 app.add_middleware(
@@ -54,32 +61,30 @@ app.add_middleware(
 # ── Singletons ─────────────────────────────────────────────────────────────
 compiler = IntentCompiler()
 drift_detector = DriftDetector()
+scm = build_network_scm()
+mild = MILDStateMachine(drift_detector=drift_detector, scm=scm)
+policy_engine = build_baseline_policy_engine()
+delegator = AdaptiveDelegator(policy_engine=policy_engine)
 
-# In-memory result store (replace with Redis in production)
+# In-memory stores
 _compile_results: dict[str, dict[str, Any]] = {}
 _drift_history: list[dict[str, Any]] = []
 
 
-# ── Pydantic schemas ───────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════ #
+# Pydantic Schemas                                                           #
+# ══════════════════════════════════════════════════════════════════════════ #
 
 class CompileIntentRequest(BaseModel):
-    intent_text: str = Field(..., description="High-level declarative intent in natural language")
-    role: str = Field(..., description="Acting role (e.g., 'network-ops', 'sre-tier2')")
-    domain: str = Field(..., description="Target resource domain (e.g., 'routing', 'telemetry')")
-    required_actions: list[str] = Field(default_factory=list)
+    intent_text: str
+    role: str
+    domain: str
+    required_actions: list[str] = []
     closure_threshold: float = Field(default=0.2, ge=0.0, le=1.0)
-
-    model_config = {"json_schema_extra": {"examples": [{
-        "intent_text": "Ensure API gateway p99 latency < 50ms during peak hours",
-        "role": "network-ops",
-        "domain": "api-gateway",
-        "required_actions": ["read_metrics", "update_routing_policy"],
-        "closure_threshold": 0.2,
-    }]}}
 
 
 class KPIIngestRequest(BaseModel):
-    intent: str = Field(..., description="Macro-intent: I_tel, I_anl, or I_api")
+    intent: str = Field(..., description="I_tel | I_anl | I_api")
     kpi_name: str
     value: float
     baseline_mean: float
@@ -87,34 +92,58 @@ class KPIIngestRequest(BaseModel):
     timestamp: float | None = None
 
 
-class CompileIntentResponse(BaseModel):
-    intent_id: str
-    decision: str
-    gap_vector: dict[str, Any]
-    selected_path_id: str | None
-    compilation_time_ms: float
-    notes: list[str]
-    component_details: dict[str, Any]
+class DelegationRequestSchema(BaseModel):
+    role: str
+    domain: str
+    requested_actions: list[str]
+    risk_tier: str = Field(default="low", pattern="^(low|medium|high)$")
+    max_duration_seconds: float = Field(default=300.0, ge=30.0, le=3600.0)
+    gap_vector: dict[str, float] | None = None
+    action_budgets: dict[str, int] | None = None
+
+    model_config = {"json_schema_extra": {"examples": [{
+        "role": "network-ops",
+        "domain": "routing",
+        "requested_actions": ["read_metrics", "update_routing_policy"],
+        "risk_tier": "medium",
+        "max_duration_seconds": 300,
+    }]}}
 
 
-# ── Routes ─────────────────────────────────────────────────────────────────
+class ShrinkEnvelopeRequest(BaseModel):
+    new_actions: list[str]
+    reason: str = "risk escalation"
+
+
+class InterventionRequest(BaseModel):
+    node_id: str
+    delta: float = Field(..., description="Magnitude of intervention (positive = increase)")
+    propagation_decay: float = Field(default=0.6, ge=0.0, le=1.0)
+
+
+# ══════════════════════════════════════════════════════════════════════════ #
+# Health                                                                     #
+# ══════════════════════════════════════════════════════════════════════════ #
 
 @app.get("/health")
-async def health_check() -> dict[str, str]:
-    return {"status": "ok", "service": "intent-drift-engine", "version": "0.1.0"}
+async def health_check() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "service": "intent-drift-engine",
+        "version": "0.2.0",
+        "ws_connections": manager.connection_count(),
+        "system_health": mild.system_health(),
+    }
 
 
-@app.post("/intents/compile", response_model=CompileIntentResponse)
-async def compile_intent(body: CompileIntentRequest) -> CompileIntentResponse:
-    """
-    Submit a high-level intent for compilation.
+# ══════════════════════════════════════════════════════════════════════════ #
+# Intent Compiler                                                            #
+# ══════════════════════════════════════════════════════════════════════════ #
 
-    The compiler resolves the closure-gap vector C_t and returns a
-    compilation decision (PROCEED / DEFER / REJECT / OVERCLOSE_RISK).
-    """
+@app.post("/intents/compile")
+async def compile_intent(body: CompileIntentRequest) -> dict[str, Any]:
+    """Compile a high-level intent — resolves C_t and returns a decision."""
     intent_id = str(uuid.uuid4())[:8]
-
-    # Build a minimal request (no external sources/paths for now)
     request = IntentCompilationRequest(
         intent_id=intent_id,
         intent_text=body.intent_text,
@@ -123,9 +152,8 @@ async def compile_intent(body: CompileIntentRequest) -> CompileIntentResponse:
         required_actions=body.required_actions,
         closure_threshold=body.closure_threshold,
     )
-
     result = await compiler.compile_async(request)
-    serialized = {
+    serialized: dict[str, Any] = {
         "intent_id": result.intent_id,
         "decision": result.decision.value,
         "gap_vector": result.gap_vector.to_dict(),
@@ -135,12 +163,14 @@ async def compile_intent(body: CompileIntentRequest) -> CompileIntentResponse:
         "component_details": result.component_details,
     }
     _compile_results[intent_id] = serialized
-    return CompileIntentResponse(**serialized)
+
+    # Broadcast to WebSocket clients
+    await manager.broadcast("intent_compiled", serialized)
+    return serialized
 
 
 @app.get("/intents/{intent_id}/status")
 async def get_intent_status(intent_id: str) -> dict[str, Any]:
-    """Retrieve the compilation result for a previously submitted intent."""
     if intent_id not in _compile_results:
         raise HTTPException(status_code=404, detail=f"Intent '{intent_id}' not found.")
     return _compile_results[intent_id]
@@ -148,13 +178,16 @@ async def get_intent_status(intent_id: str) -> dict[str, Any]:
 
 @app.get("/intents/")
 async def list_intents() -> dict[str, Any]:
-    """List all compiled intents."""
     return {"total": len(_compile_results), "intents": list(_compile_results.values())}
 
 
+# ══════════════════════════════════════════════════════════════════════════ #
+# Drift Detection                                                            #
+# ══════════════════════════════════════════════════════════════════════════ #
+
 @app.post("/drift/ingest")
 async def ingest_kpi(body: KPIIngestRequest) -> dict[str, Any]:
-    """Ingest a KPI observation and run drift detection."""
+    """Ingest a KPI observation and run drift detection + MILD tick."""
     try:
         macro = MacroIntent(body.intent)
     except ValueError:
@@ -172,41 +205,184 @@ async def ingest_kpi(body: KPIIngestRequest) -> dict[str, Any]:
         baseline_std=body.baseline_std,
     )
 
-    result = drift_detector.detect([obs])
-    summary = {
-        "most_severe": result.most_severe.value,
-        "events": [
-            {
-                "intent": e.affected_intent.value,
-                "kpi": e.kpi_name,
-                "severity": e.severity.value,
-                "z_score": round(e.z_score, 3),
-                "root_cause": e.root_cause_intent.value if e.root_cause_intent else None,
-            }
-            for e in result.events
-        ],
-        "causal_links": [
-            {
-                "cause": lk.cause.value,
-                "effect": lk.effect.value,
-                "f_stat": round(lk.granger_f_statistic, 3),
-                "p_value": round(lk.p_value, 4),
-                "lag": lk.lag_steps,
-                "significant": lk.significant,
-            }
-            for lk in result.causal_links
-        ],
-        "notes": result.notes,
-    }
-    _drift_history.append(summary)
-    return summary
+    # Run MILD tick (includes drift detection internally)
+    snapshot = mild.tick([obs])
+    _drift_history.append(snapshot)
+
+    # Broadcast to WebSocket clients
+    await manager.broadcast("state_snapshot", snapshot)
+    if snapshot["most_severe"] in ("drift", "critical"):
+        await manager.broadcast("drift_alert", {
+            "most_severe": snapshot["most_severe"],
+            "system_health": snapshot["system_health"],
+            "log": snapshot["log"],
+        })
+
+    return snapshot
 
 
 @app.get("/drift/status")
 async def drift_status() -> dict[str, Any]:
-    """Return current drift state across all macro-intents."""
     latest = _drift_history[-1] if _drift_history else {}
+    return {"total_ticks": len(_drift_history), "latest": latest}
+
+
+# ══════════════════════════════════════════════════════════════════════════ #
+# MILD State Machine                                                         #
+# ══════════════════════════════════════════════════════════════════════════ #
+
+@app.get("/mild/status")
+async def mild_status() -> dict[str, Any]:
+    """Full snapshot of MILD state machine across all macro-intents."""
     return {
-        "total_events_processed": len(_drift_history),
-        "latest": latest,
+        "system_health": mild.system_health(),
+        "intents": {
+            intent.value: mild.get_state(intent).to_dict()
+            for intent in MacroIntent
+        },
     }
+
+
+@app.post("/mild/tick")
+async def mild_tick(observations: list[KPIIngestRequest]) -> dict[str, Any]:
+    """Manually trigger one MILD control loop tick with a batch of KPIs."""
+    obs_list: list[KPIObservation] = []
+    for body in observations:
+        try:
+            macro = MacroIntent(body.intent)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid intent '{body.intent}'")
+        obs_list.append(KPIObservation(
+            intent=macro,
+            kpi_name=body.kpi_name,
+            value=body.value,
+            timestamp=body.timestamp or time.time(),
+            baseline_mean=body.baseline_mean,
+            baseline_std=body.baseline_std,
+        ))
+    snapshot = mild.tick(obs_list)
+    await manager.broadcast("state_snapshot", snapshot)
+    return snapshot
+
+
+# ══════════════════════════════════════════════════════════════════════════ #
+# SCM — Structural Causal Model                                              #
+# ══════════════════════════════════════════════════════════════════════════ #
+
+@app.get("/scm/summary")
+async def scm_summary() -> dict[str, Any]:
+    """Return SCM graph summary — nodes, edges, topological order."""
+    return {
+        **scm.summary(),
+        "edges": scm.to_edge_list(),
+    }
+
+
+@app.post("/scm/intervene")
+async def scm_intervene(body: InterventionRequest) -> dict[str, Any]:
+    """
+    Run a do-calculus intervention on a SCM node.
+    Returns predicted downstream effects and explanation.
+    """
+    try:
+        result = scm.intervene(
+            node_id=body.node_id,
+            delta=body.delta,
+            propagation_decay=body.propagation_decay,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return {
+        "intervened_node": result.intervened_node,
+        "intervention_value": result.intervention_value,
+        "predicted_effects": result.predicted_effects,
+        "causal_path": result.causal_path,
+        "explanation": result.explanation,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════ #
+# Delegation Envelopes                                                       #
+# ══════════════════════════════════════════════════════════════════════════ #
+
+@app.post("/delegation/request")
+async def request_delegation(body: DelegationRequestSchema) -> dict[str, Any]:
+    """Request an adaptive delegation envelope for a role-domain-action set."""
+    gap = None
+    if body.gap_vector:
+        try:
+            gap = ClosureGapVector(**body.gap_vector)
+        except (TypeError, ValueError) as e:
+            raise HTTPException(status_code=422, detail=f"Invalid gap_vector: {e}")
+
+    req = DelegationRequest(
+        requester_role=body.role,
+        domain=body.domain,
+        requested_actions=body.requested_actions,
+        gap_vector=gap,
+        max_duration_seconds=body.max_duration_seconds,
+        risk_tier=RiskTier(body.risk_tier),
+        action_budgets=body.action_budgets,
+    )
+    response = delegator.request_envelope(req)
+
+    result: dict[str, Any] = {
+        "granted": response.granted,
+        "gap_block_reason": response.gap_block_reason,
+        "denied_actions": response.denied_actions,
+        "notes": response.notes,
+        "envelope": response.envelope.to_dict() if response.envelope else None,
+    }
+    if response.granted and response.envelope:
+        await manager.broadcast("envelope_issued", result)
+    return result
+
+
+@app.get("/delegation/{envelope_id}")
+async def get_envelope(envelope_id: str) -> dict[str, Any]:
+    """Get the current state of a delegation envelope."""
+    env = delegator.get_envelope(envelope_id)
+    if not env:
+        raise HTTPException(status_code=404, detail=f"Envelope '{envelope_id}' not found.")
+    return env.to_dict()
+
+
+@app.delete("/delegation/{envelope_id}")
+async def revoke_envelope(envelope_id: str, reason: str = "api revocation") -> dict[str, Any]:
+    """Revoke an active delegation envelope."""
+    ok = delegator.revoke_envelope(envelope_id, reason)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Envelope '{envelope_id}' not found or already revoked.")
+    await manager.broadcast("envelope_revoked", {"envelope_id": envelope_id, "reason": reason})
+    return {"revoked": True, "envelope_id": envelope_id}
+
+
+@app.post("/delegation/{envelope_id}/shrink")
+async def shrink_envelope(envelope_id: str, body: ShrinkEnvelopeRequest) -> dict[str, Any]:
+    """Adaptively shrink an envelope's permitted action set."""
+    ok = delegator.shrink_envelope(envelope_id, body.new_actions, body.reason)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Envelope '{envelope_id}' not found or inactive.")
+    env = delegator.get_envelope(envelope_id)
+    return {"shrunk": True, "envelope": env.to_dict() if env else None}
+
+
+@app.get("/delegation/")
+async def list_envelopes() -> dict[str, Any]:
+    """List all currently active delegation envelopes."""
+    active = delegator.get_active_envelopes()
+    return {
+        "active_count": len(active),
+        "envelopes": [e.to_dict() for e in active],
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════ #
+# WebSocket                                                                  #
+# ══════════════════════════════════════════════════════════════════════════ #
+
+@app.websocket("/ws/kpi-stream")
+async def websocket_kpi_stream(websocket: WebSocket) -> None:
+    """Real-time KPI stream — broadcasts drift events, state snapshots, and alerts."""
+    await kpi_stream_endpoint(websocket)
